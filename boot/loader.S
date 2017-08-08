@@ -18,11 +18,12 @@ DATA_STACK_DESC:
     dd DESC_DATA_H4BYTES
 
 VIDEO_DESC:
-    dd 0x80000007 ;limit = (0xbffff-0xb8000)/4KB=7
+    dd 0x80000007 ;limit = (0xbffff-0xb8000)/4KB=7（不是完全相等，根据描述符段界限和实际段界限的公式换算出来的）
+                    ;实际段界限 = 描述符段界限 x 0x1000 + 0xFFF，实际段界限就是有效地址，就是偏移地址，就是范围
     dd DESC_VIDEO_H4BYTES  
 
 DATA_STACK1_DESC:
-    dd 0x00000000
+    dd 0x00000001 ;界限是1，表示最低的4KBx2字节的空间，该段不能使用，理论上有效空间是（8KB=0x2000）--4GB（0xFFFFFFFF），但考虑到bochs虚拟机的配置，只能到32MB
     dd DESC_DATA1_H4BYTES  
 
 GDT_SIZE    equ  $ - GDT_BASE
@@ -92,11 +93,11 @@ p_mode_start:
     mov es,ax
     mov ss,ax
 
-    mov esp,0xFFFFFFF10
-    ;mov esp,0xF0001000;这是合法的最小栈地址--段描述符中limit部分是0xF0000，
-                        ;所以实际的锻界限县是(0xF0000×0x1000 + 0XFFF=0xF0000FFF)，由于这里是上扩展，所以最低有效地址是实际界限加1等于0xF0001000
-    ;mov esp,0xF0001002;对堆栈段的保护是在进行内存读写的时候发生，单独改变esp不会进行合法性检查，只有进行内存访问的时候才检查，
-                        ;在push/pop时，如果越过0xF0001000就会触发异常
+    mov esp,0x10000;esp指向64KB的地方
+    ;mov esp,0x2000;这是合法的最小栈地址--段描述符中limit部分是0x1，
+                        ;所以实际的锻界限县是(0x1×0x1000 + 0XFFF=0x1FFF)，由于这里是上扩展，所以最低有效地址是实际界限加1等于0x2000
+                        ;对堆栈段的保护是在进行内存读写的时候发生，单独改变esp不会进行合法性检查，只有进行内存访问的时候才检查，
+                        ;在push/pop时，如果越过0x2000就会触发异常
     push word 0xCDEF
 
     jmp $

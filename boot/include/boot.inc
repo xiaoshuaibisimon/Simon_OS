@@ -13,6 +13,8 @@ DESC_AVL                equ     0x000000 ;bit20=0，暂时没用到，对操作�
 
 DESC_LIMIT_CODE_H4      equ     0x0F0000  ;bits[19-16]=0xF，表示代码段界限的高4bits，这里吧代码段和普通数据段的limit都设置为全F，整个区间就是4GB 
 DESC_LIMIT_DATA_H4      equ     DESC_LIMIT_CODE_H4 ;bits[19-16]=0xF，表示数据段界限的高4bits 
+DESC_LIMIT_DATA1_H4      equ     0x000000 ;bits[19-16]=0x0，表示数据段界限的高4bits,由于bochs配置的内存只是32MB，
+                                          ;所以我们在向下扩展的时候，界限用1就可以了，也就是不用最低的4KB空间
 DESC_LIMIT_VIDEO_H4     equ     0x000000 ;bits[19-16]=0x0，表示用于显存的数据段界限的高4bits，结合实模式下1MB内存布局和颗粒为4KB，
                                          ;可知道用于文本模式的显存区间limit只是(0xbffff-0xb8000)/4KB = 7,所以limit的高4为是0 
 
@@ -48,7 +50,7 @@ DESC_VIDEO_H4BYTES      equ     ((0x00 << 24) + DESC_G_4K + DESC_D_32 +  \
 
 ;数据段的高32bits
 DESC_DATA1_H4BYTES       equ     ((0x00 << 24) + DESC_G_4K + DESC_D_32 +  \
-                                DESC_L + DESC_AVL + DESC_LIMIT_DATA_H4 +  \
+                                DESC_L + DESC_AVL + DESC_LIMIT_DATA1_H4 +  \
                                 DESC_P +DESC_DPL_0 + DESC_S_DATA + DESC_TYPE_DATA1 + 0x00)
 
 
