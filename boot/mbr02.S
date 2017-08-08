@@ -60,7 +60,7 @@ SECTION MBR vstart=0x7c00   ;告诉编译器，起始地址是0x7c00，jmp 0:0x7
 ;----------------added for load loader from disk，用eax，bx，cx做参数传递---------------------
     mov eax,LOADER_START_SECTOR    ;起始扇区地址，这里用LBA28，eax是32bits足够用了，但ax是16bits不够用来存放LBA地址
     mov bx,LOADER_BASE_ADDR         ;loader在内存中的起始地址/待写入的地址
-    mov cx,1                        ;待写入的扇区数
+    mov cx,SECTOR_COUNT                        ;待写入的扇区数
 
     call rd_disk_m_16               ;读取loader到指定地址
 
