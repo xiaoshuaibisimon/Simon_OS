@@ -72,4 +72,16 @@ PG_RW_W                 equ     10b
 PG_RW_R                 equ     00b
 
 PG_US_S                 equ     000b
-PG_US_U                 equ     100b     
+PG_US_U                 equ     100b
+
+;加载内核
+KERNEL_START_SECTOR     equ     0x9 ;0号被MBR用，2-5被loader用，从9号扇区开始存放内核文件
+KERNEL_BIN_BASE_ADDR    equ     0x70000  ;只要是在0x7e00---0x9fbff之间都可以，但也的保证存得下内核文件，
+                                            ;假设内核100KB，选一个整数0x70000，他到0x9fbff之间将近190KB，足够用了，可以改成其他地址的
+KERNEL_SECTOR_COUNT     equ     200 ;200个扇区足够存放内核了
+
+KERNEL_ENTRY_POINT      equ     0xc0001500  ;loader.bin的起始地址是0x900，假设他有2KB大小，为了使用他建立的GDT等全局资源
+                                            ;我们可用的起始地址是0x900+2048=0x1100，取比他大的一个整数，选择0x1500，对应成虚拟地址就是0xc0001500.
+                                            ;可换其他值
+
+PT_NULL                 equ     0

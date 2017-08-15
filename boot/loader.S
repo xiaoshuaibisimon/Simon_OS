@@ -141,7 +141,7 @@ loader_start:
     mov [total_mem_size],edx
     jmp .protect_mode_on
 .error_halt:
-    jmp $
+    hlt
 ;取消掉实模式下的打印功能
 ;-------------------------------------------------------------------------------
     ;打印字符串--0x13号子功能，用的BIOS中断
@@ -215,6 +215,15 @@ p_mode_start:
 
     mov esp,LOADER_STACK_TOP
 ;-----------------------------------------------------------------------------------------------------------------------------
+
+;加载kernel文件到内存
+    mov eax,KERNEL_START_SECTOR
+    mov ebx,KERNEL_BIN_BASE_ADDR
+    mov ecx,KERNEL_SECTOR_COUNT
+
+    call rd_disk_m_32
+
+;开启分页机制
     ;设置页目录和页表
     call setup_pages
 
@@ -250,8 +259,15 @@ p_mode_start:
 
 ;==============================================================================================================================
 ;------------------------------------------------------------------------------------------------------------------------------
-    jmp $    
+;    jmp $;加载内核完毕以后，loader使命结束，直接接力给kernel了，不用再在这里死循环了    
 ;==============================================================================================================================
+
+    jmp SELECTOR_CODE:enter_kernel  ; 刷新流水线，避免分支预测的影响,这种cpu优化策略，最怕jmp跳转，
+					     ; 这将导致之前做的预测失效，从而起到了刷新的作用。
+enter_kernel:
+    call kernel_init
+    mov  esp,0xc009f000
+    jmp  KERNEL_ENTRY_POINT
 
 
 ;设置页表
@@ -308,3 +324,156 @@ setup_pages:
 
     ret
 
+;-------------------------------------------------------------------------------
+			   ;功能:读取硬盘n个扇区
+rd_disk_m_32:	   
+;-------------------------------------------------------------------------------
+							 ; eax=LBA扇区号
+							 ; ebx=将数据写入的内存地址
+							 ; ecx=读入的扇区数
+      mov esi,eax	   ; 备份eax
+      mov di,cx		   ; 备份扇区数到di
+;读写硬盘:
+;第1步：设置要读取的扇区数
+      mov dx,0x1f2
+      mov al,cl
+      out dx,al            ;读取的扇区数
+
+      mov eax,esi	   ;恢复ax
+
+;第2步：将LBA地址存入0x1f3 ~ 0x1f6
+
+      ;LBA地址7~0位写入端口0x1f3
+      mov dx,0x1f3                       
+      out dx,al                          
+
+      ;LBA地址15~8位写入端口0x1f4
+      mov cl,8
+      shr eax,cl
+      mov dx,0x1f4
+      out dx,al
+
+      ;LBA地址23~16位写入端口0x1f5
+      shr eax,cl
+      mov dx,0x1f5
+      out dx,al
+
+      shr eax,cl
+      and al,0x0f	   ;lba第24~27位
+      or al,0xe0	   ; 设置7～4位为1110,表示lba模式
+      mov dx,0x1f6
+      out dx,al
+
+;第3步：向0x1f7端口写入读命令，0x20 
+      mov dx,0x1f7
+      mov al,0x20                        
+      out dx,al
+
+;;;;;;; 至此,硬盘控制器便从指定的lba地址(eax)处,读出连续的cx个扇区,下面检查硬盘状态,不忙就能把这cx个扇区的数据读出来
+
+;第4步：检测硬盘状态
+  .not_ready:		   ;测试0x1f7端口(status寄存器)的的BSY位
+      ;同一端口,写时表示写入命令字,读时表示读入硬盘状态
+      nop
+      in al,dx
+      and al,0x88	   ;第4位为1表示硬盘控制器已准备好数据传输,第7位为1表示硬盘忙
+      cmp al,0x08
+      jnz .not_ready	   ;若未准备好,继续等。
+
+;第5步：从0x1f0端口读数据
+      mov ax, di	   ;以下从硬盘端口读数据用insw指令更快捷,不过尽可能多的演示命令使用,
+			   ;在此先用这种方法,在后面内容会用到insw和outsw等
+
+      mov dx, 256	   ;di为要读取的扇区数,一个扇区有512字节,每次读入一个字,共需di*512/2次,所以di*256
+      mul dx
+      mov cx, ax	   
+      mov dx, 0x1f0
+  .go_on_read:
+      in ax,dx		
+      mov [ebx], ax
+      add ebx, 2
+			  ; 由于在实模式下偏移地址为16位,所以用bx只会访问到0~FFFFh的偏移。
+			  ; loader的栈指针为0x900,bx为指向的数据输出缓冲区,且为16位，
+			  ; 超过0xffff后,bx部分会从0开始,所以当要读取的扇区数过大,待写入的地址超过bx的范围时，
+			  ; 从硬盘上读出的数据会把0x0000~0xffff的覆盖，
+			  ; 造成栈被破坏,所以ret返回时,返回地址被破坏了,已经不是之前正确的地址,
+			  ; 故程序出会错,不知道会跑到哪里去。
+			  ; 所以改为ebx代替bx指向缓冲区,这样生成的机器码前面会有0x66和0x67来反转。
+			  ; 0X66用于反转默认的操作数大小! 0X67用于反转默认的寻址方式.
+			  ; cpu处于16位模式时,会理所当然的认为操作数和寻址都是16位,处于32位模式时,
+			  ; 也会认为要执行的指令是32位.
+			  ; 当我们在其中任意模式下用了另外模式的寻址方式或操作数大小时,编译器会在指令前帮我们加上0x66或0x67，
+			  ; 临时改变当前cpu模式到另外的模式下.
+			  ; 假设当前运行在16位模式,遇到0X66时,操作数大小变为32位.
+			  ; 假设当前运行在32位模式,遇到0X66时,操作数大小变为16位.
+			  ; 假设当前运行在16位模式,遇到0X67时,寻址方式变为32位寻址
+			  ; 假设当前运行在32位模式,遇到0X67时,寻址方式变为16位寻址.
+              ;这里又由于直接是保护模式，所以用32位寄存器，避免wrap around
+
+      loop .go_on_read
+      ret
+
+;其实执行该函数的时候，已经打开分页机制，设计的地址都应该是虚拟地址，只不过由于在搬运内核释放映像的过程中，
+;操作的是低端1MB内存，物理地址和虚拟地址是一样的值
+;gcc -c -o  main.o main.c -m32
+;ld main.o -Ttext 0xc0001500 -e main -o kernel.bin -melf_i386
+;xxd -u -a -g 1 -s 0 -l 2048 kernel.bin 
+;gcc -S main.c -o main.S -m32
+;发现执行不正常，用b设置断点从loader的入口地址开始（物理地址），发现死在rep操作，表明访问了非法内存，其实可以ptime获取此时执行的指令条数，从新用sba设置断点
+;判断读的elf header和程序头的数据是否正确--通过比对kernel.bin和内存中物理地址为0x70000处的数据，发现正确读取了kernel.bin到内存
+;既然正确读取了kernel到内存，但是在复制的时候存在非法内存访问，只能说明kernel对应elf格式中读取出来的参数有问题，比对kernel中的文件头，发现他是64位的elf文件
+;宿主机是64位的Linux，模拟器是32位的x86，所以elf格式不匹配，参数选取错误。应该编译出32位用的elf文件。gcc用-m32选项，ld用-melf_i386选项。
+;再编译出main.c对应的汇编文件，看看进入main以后如何处理栈
+;全速运行模拟器以后，用print-stack查看栈中数据，再和自己设定的临时变量比对，结合汇编文件，判断是否正确执行到了main.c
+
+kernel_init:
+    xor eax,eax
+    xor ebx,ebx ;记录程序头表地址
+    xor ecx,ecx ;记录程序头的数量
+    xor edx,edx ;记录程序头的大小
+
+    ;在ELF  header中进行信息采集
+    mov dx,[KERNEL_BIN_BASE_ADDR+42] ;获取ELF格式文件中program header的大小
+    mov ebx,[KERNEL_BIN_BASE_ADDR+28] ;读取program header tables在文件中的偏移量
+    add ebx,KERNEL_BIN_BASE_ADDR ;加上内核的起始物理地址便得到程序头表的物理地址，也是第一个程序头的虚拟地址
+
+    mov cx,[KERNEL_BIN_BASE_ADDR + 44] ;获取程序头/段头/segment的个数
+
+.each_segment:
+    cmp byte [ebx+0],PT_NULL ;如果程序头的p_type为0--表示该头未使用，直接检查下一个头
+    je  .PTNULL ;检查下一个segment
+
+    ;为mem_cpy传递参数，从右往左依次压入
+    push dword [ebx+16] ;表示本段在文件中的大小--单位是字节
+
+    mov eax,[ebx+4] ;本段在文件内的起始偏移字节
+    add eax,KERNEL_BIN_BASE_ADDR ;获取本段对应的物理地址
+
+    push eax ;压入mem_cpy的第二个参数，原地址
+    push dword [ebx+8] ;压入mem_cpy的第一个参数，目标地址
+
+    call mem_cpy ;完成本段的数据复制--建立内核映像的一个段
+    add esp,12 ;回收栈空间
+
+.PTNULL:
+    add ebx,edx ;ebx指向下一个程序头
+    loop .each_segment ;
+
+    ret
+;复制一块数据到目标地址，参数由栈提供，主调函数将实参压栈
+mem_cpy:
+    cld ;清除eflags寄存器中的标志位，设置为地址递增
+    push ebp ;使用ebp作为参数的基址--有的时候要快速访问栈里面的内容，用ebp好于esp
+    mov ebp,esp ;设置ebp指向保存旧的ebp的位置，再往上8个字节就是存储第一个参数的位置--call指令调用函数的时候自动压入返回地址
+    push ecx ;保存ecx--因为外层遍历程序头表还要用到
+
+    mov edi,[ebp+8] ;取出目的地址
+    mov esi,[ebp+12] ;取出原地址
+    mov ecx,[ebp+16] ;取出要拷贝的字节数
+
+    rep movsb ;根据ecx逐个字节拷贝
+
+    ;恢复环境
+    pop ecx 
+    pop ebp
+    ret
