@@ -62,3 +62,14 @@ RPL3                    equ     11b
 
 TI_GDT                  equ     000b ;段描述符所在的表在GDT
 TI_LDT                  equ     100b ;在LDT
+
+
+;页目录项和页表项属性
+PAGE_DIR_TABLE_POS      equ     0x100000 ;页目录表起始地址，1MB地址下一个字节
+
+PG_P                    equ     1b
+PG_RW_W                 equ     10b
+PG_RW_R                 equ     00b
+
+PG_US_S                 equ     000b
+PG_US_U                 equ     100b     
